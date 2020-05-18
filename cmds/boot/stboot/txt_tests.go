@@ -13,7 +13,6 @@ import (
 
 	api "github.com/9elements/txt-suite/pkg/api"
 	cpuid "github.com/intel-go/cpuid"
-	a "github.com/logrusorgru/aurora"
 	tss "github.com/u-root/u-root/pkg/tss"
 )
 
@@ -229,11 +228,14 @@ var (
 )
 
 // TPM Test functions
+var (
+	conn *tss.TPM
+)
 
 // Connects to a TPM device (virtual or real) at the given path
 func TestTPMConnect() (bool, error, error) {
-	_, err := tss.NewTPM()
-
+	var err error
+	conn, err = tss.NewTPM()
 	if err != nil {
 		return false, err, nil
 	}
@@ -242,7 +244,6 @@ func TestTPMConnect() (bool, error, error) {
 
 // Checks if TPM 1.2 is present and answers to GetCapability
 func TestTPM12Present() (bool, error, error) {
-	conn, err := tss.NewTPM()
 	if conn.Version != tss.TPMVersion12 {
 		return false, fmt.Errorf("No TPM 1.2 connection"), nil
 	}
@@ -251,6 +252,7 @@ func TestTPM12Present() (bool, error, error) {
 		return false, nil, err
 	}
 	if info.Manufacturer == tss.TCGVendorID(0) {
+		fmt.Printf("%v", info.Manufacturer)
 		return false, fmt.Errorf("TestTPM12Present: GetManufacturer() didn't return anything"), nil
 	}
 	return true, nil, nil
@@ -258,7 +260,6 @@ func TestTPM12Present() (bool, error, error) {
 }
 
 func TestTPM2Present() (bool, error, error) {
-	conn, err := tss.NewTPM()
 	if conn.Version != tss.TPMVersion20 {
 		return false, fmt.Errorf("No TPM 2 connection"), nil
 	}
@@ -1013,21 +1014,18 @@ func runTxtTests(debug bool) error {
 	f := bufio.NewWriter(os.Stdout)
 	ret := true
 	for index, _ := range AllTests {
-		if AllTests[index].Result == ResultNotRun {
-			continue
-		}
-		fmt.Printf("%-40s: ", a.Bold(AllTests[index].Name))
+		fmt.Printf("%v: ", AllTests[index].Name)
 		f.Flush()
 
 		ret = AllTests[index].Run()
 
 		if AllTests[index].Result == ResultPass && debug {
-			fmt.Printf("%-20s\n", a.Bold(a.Green(AllTests[index].Result)))
+			fmt.Printf("%v: \n", AllTests[index].Result)
 		} else {
-			fmt.Printf("%-20s\n", a.Bold(a.Red(AllTests[index].Result)))
+			fmt.Printf("%v: \n", AllTests[index].Result)
 		}
 		if AllTests[index].ErrorText != "" {
-			fmt.Printf(" %s\n\n", AllTests[index].ErrorText)
+			fmt.Printf("%v: \n", AllTests[index].ErrorText)
 		}
 		f.Flush()
 	}

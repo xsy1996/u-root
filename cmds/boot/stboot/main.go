@@ -25,8 +25,9 @@ import (
 var debug = func(string, ...interface{}) {}
 
 var (
-	dryRun  = flag.Bool("dryrun", false, "Do everything except booting the loaded kernel")
-	doDebug = flag.Bool("d", false, "Print debug output")
+	dryRun    = flag.Bool("dryrun", false, "Do everything except booting the loaded kernel")
+	doDebug   = flag.Bool("d", false, "Print debug output")
+	execTests = flag.Bool("txt", false, "Execute TXT tests")
 )
 
 const (
@@ -67,6 +68,12 @@ func main() {
 		debug = log.Printf
 	}
 	log.Print(banner)
+
+	if *execTests {
+		if err := runTxtTests(*doDebug); err != nil {
+			log.Printf("TXT tests with error %v", err)
+		}
+	}
 
 	vars, err := stboot.FindHostVarsInInitramfs()
 	if err != nil {

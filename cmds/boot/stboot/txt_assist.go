@@ -1922,36 +1922,19 @@ type Test struct {
 }
 
 func (self *Test) Run() bool {
-	var DepsPassed = true
-	// Make sure all dependencies have run and passed
-	for idx, _ := range self.dependencies {
-		if self.dependencies[idx].Status == TestNotImplemented {
-			continue
-		}
-		if self.dependencies[idx].Result == ResultNotRun {
-			self.dependencies[idx].Run()
-		}
-		if self.dependencies[idx].Result != ResultPass {
-			self.ErrorText = self.dependencies[idx].Name + " failed"
-			self.Result = ResultDependencyFailed
-			DepsPassed = false
-		}
-	}
 
-	if DepsPassed {
-		// Now run the test itself
-		rc, testerror, internalerror := self.function()
-		if internalerror != nil && testerror == nil {
-			self.Result = ResultInternalError
-			self.ErrorText = internalerror.Error()
-		} else if testerror != nil && internalerror == nil {
-			self.ErrorText = testerror.Error()
-			self.Result = ResultFail
-		} else if rc {
-			self.Result = ResultPass
-		} else {
-			self.Result = ResultFail
-		}
+	// Now run the test itself
+	rc, testerror, internalerror := self.function()
+	if internalerror != nil && testerror == nil {
+		self.Result = ResultInternalError
+		self.ErrorText = internalerror.Error()
+	} else if testerror != nil && internalerror == nil {
+		self.ErrorText = testerror.Error()
+		self.Result = ResultFail
+	} else if rc {
+		self.Result = ResultPass
+	} else {
+		self.Result = ResultFail
 	}
 
 	return self.Result == ResultPass
