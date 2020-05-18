@@ -5,9 +5,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/binary"
 	"fmt"
+	"os"
+
 	api "github.com/9elements/txt-suite/pkg/api"
 	cpuid "github.com/intel-go/cpuid"
+	a "github.com/logrusorgru/aurora"
 	tss "github.com/u-root/u-root/pkg/tss"
 )
 
@@ -226,7 +232,7 @@ var (
 
 // Connects to a TPM device (virtual or real) at the given path
 func TestTPMConnect() (bool, error, error) {
-	conn, err := tss.NewTPM()
+	_, err := tss.NewTPM()
 
 	if err != nil {
 		return false, err, nil
@@ -236,19 +242,17 @@ func TestTPMConnect() (bool, error, error) {
 
 // Checks if TPM 1.2 is present and answers to GetCapability
 func TestTPM12Present() (bool, error, error) {
-	/*
-		conn, err := tss.NewTPM()
-		if conn.Version != tss.TPMVersion12 {
-			return false, fmt.Errorf("No TPM 1.2 connection"), nil
-		}
-		//ToDo: Implement GetManufacturer in tss
-		vid, err := conn.GetManufacturer()
-		if err != nil {
-			return false, nil, err
-		}
-		if vid == nil {
-			return false, fmt.Errorf("TestTPM12Present: GetManufacturer() didn't return anything"), nil
-		}*/
+	conn, err := tss.NewTPM()
+	if conn.Version != tss.TPMVersion12 {
+		return false, fmt.Errorf("No TPM 1.2 connection"), nil
+	}
+	info, err := conn.Info()
+	if err != nil {
+		return false, nil, err
+	}
+	if info.Manufacturer == tss.TCGVendorID(0) {
+		return false, fmt.Errorf("TestTPM12Present: GetManufacturer() didn't return anything"), nil
+	}
 	return true, nil, nil
 
 }
@@ -258,11 +262,11 @@ func TestTPM2Present() (bool, error, error) {
 	if conn.Version != tss.TPMVersion20 {
 		return false, fmt.Errorf("No TPM 2 connection"), nil
 	}
-	ca, _, err := tpm2.GetCapability(*tpm20Connection, tpm2.CapabilityTPMProperties, 1, uint32(tpm2.Manufacturer))
+	info, err := conn.Info()
 	if err != nil {
 		return false, nil, err
 	}
-	if ca == nil {
+	if info.Manufacturer == tss.TCGVendorID(0) {
 		return false, fmt.Errorf("TestTPM2Present: no Manufacturer returned"), nil
 	}
 	return true, nil, nil
@@ -277,57 +281,63 @@ func TestTPMIsPresent() (bool, error, error) {
 
 // TPM NVRAM has a valid PS index
 func TestPSIndexIsSet() (bool, error, error) {
-	if tpm12Connection != nil {
-		data, err := tpm1.NVReadValue(*tpm12Connection, psIndex, 0, 54, nil)
+	conn, err := tss.NewTPM()
+	if err != nil {
+		return false, nil, err
+	}
+	switch conn.Version {
+	case tss.TPMVersion12:
+		data, err := conn.NVReadValue(psIndex, "", 54, 0)
 		if err != nil {
 			return false, nil, err
 		}
-
 		if len(data) != 54 {
 			return false, fmt.Errorf("TestPSIndexIsSet: TPM1 - Length of data not 54 "), nil
 		}
 		return true, nil, nil
-	} else if tpm20Connection != nil {
-		meta, err := tpm2.NVReadPublic(*tpm20Connection, psIndex)
+
+	case tss.TPMVersion20:
+		data, err := conn.NVReadValue(psIndex, "", 54, 0)
 		if err != nil {
 			return false, nil, err
 		}
-
-		if meta.NVIndex != psIndex {
-			return false, fmt.Errorf("TestPSIndexIsSet: TPM2 - PS Index Addresses don't match"), nil
-		}
-
-		if meta.Attributes&tpm2.KeyProp(tpm2.AttrWriteLocked) == 0 {
-			return false, fmt.Errorf("TestPSIndexIsSet: TPM2 - WriteLock not set"), nil
+		if data == nil {
+			return false, fmt.Errorf("index is set, but 0 data"), nil
 		}
 		return true, nil, nil
-	} else {
+	default:
 		return false, fmt.Errorf("Not connected to TPM"), nil
 	}
 }
 
 // TPM NVRAM has a valid AUX index
 func TestAUXIndexIsSet() (bool, error, error) {
-	if tpm12Connection != nil {
-		buf, err := tpm1.NVReadValue(*tpm12Connection, auxIndex, 0, 1, nil)
+	conn, err := tss.NewTPM()
+	if err != nil {
+		return false, nil, err
+	}
+	switch conn.Version {
+	case tss.TPMVersion12:
+		data, err := conn.NVReadValue(auxIndex, "", 1, 0)
 		if err != nil {
 			return false, nil, err
 		}
-		if len(buf) != 1 {
+		if len(data) != 1 {
 			return false, fmt.Errorf("TPM AUX Index not set"), nil
 		}
 
 		return true, nil, nil
-	} else if tpm20Connection != nil {
-		meta, err := tpm2.NVReadPublic(*tpm20Connection, auxIndex)
+
+	case tss.TPMVersion20:
+		data, err := conn.NVReadValue(auxIndex, "", 1, 0)
 		if err != nil {
 			return false, nil, err
 		}
-		if meta.NVIndex != auxIndex {
-			return false, fmt.Errorf("AUXIndexIsSet: AUXIndex Addresses don't match"), nil
+		if data == nil {
+			return false, fmt.Errorf("index is set, but 0 data"), nil
 		}
 		return true, nil, nil
-	} else {
+	default:
 		return false, nil, fmt.Errorf("Not connected to TPM")
 	}
 }
@@ -340,12 +350,58 @@ var (
 		function: TestPolicyAllowsTXT,
 		Status:   TestImplemented,
 	}
+
+	fitImage []byte
+	// set by FITVectorIsSet
+	fitPointer uint32
+	// set by testhasfit
+	fit []api.FitEntry
 )
+
+const FITSize int64 = 16 * 1024 * 1024
+const FourGiB int64 = 0x100000000
+const ResetVector = 0xFFFFFFF0
+const FITVector = 0xFFFFFFC0
+const ValidFitRange = 0xFF000000
 
 // Fit Test function
 
 // TXT not disabled by FIT Policy
 func TestPolicyAllowsTXT() (bool, error, error) {
+	// We need to get fit table manually
+	fitvec := make([]byte, 4)
+	err := api.ReadPhysBuf(FITVector, fitvec)
+	if err != nil {
+		return false, nil, err
+	}
+	buf := bytes.NewReader(fitvec)
+	err = binary.Read(buf, binary.LittleEndian, &fitPointer)
+	if err != nil {
+		return false, nil, err
+	}
+	fithdr := make([]byte, 16)
+	err = api.ReadPhysBuf(int64(fitPointer), fithdr)
+	if err != nil {
+		return false, nil, err
+	}
+
+	hdr, err := api.GetFitHeader(fithdr)
+	if err != nil {
+		return false, nil, err
+	}
+	fitblob := make([]byte, hdr.Size())
+	err = api.ReadPhysBuf(int64(fitPointer), fitblob)
+	if err != nil {
+		return false, nil, err
+	}
+	fit, err = api.ExtractFit(fitblob)
+	if err != nil {
+		return false, nil, err
+	}
+	if fit == nil {
+		return false, fmt.Errorf("FIT-Error: Referenz is nil"), nil
+	}
+
 	for _, ent := range fit {
 		if ent.Type() == api.TXTPolicyRec {
 			switch ent.Version {
@@ -459,6 +515,31 @@ var (
 		function:     TestBIOSDATAREGIONValid,
 		dependencies: []*Test{&testbiosdataregionpresent},
 		Status:       TestImplemented,
+	}
+	testhasmtrr = Test{
+		Name:     "CPU supports MTRRs",
+		Required: true,
+		function: TestHasMTRR,
+		Status:   TestImplemented,
+	}
+	testhassmrr = Test{
+		Name:     "CPU supports SMRRs",
+		Required: true,
+		function: TestHasSMRR,
+		Status:   TestImplemented,
+	}
+	testvalidsmrr = Test{
+		Name:         "SMRR covers SMM memory",
+		Required:     true,
+		function:     TestValidSMRR,
+		dependencies: []*Test{&testhassmrr},
+		Status:       TestImplemented,
+	}
+	testactiveiommi = Test{
+		Name:     "IOMMU/VT-d active",
+		Required: false,
+		function: TestActiveIOMMU,
+		Status:   TestImplemented,
 	}
 )
 
@@ -893,6 +974,66 @@ func sinitACM(regs api.TXTRegisterSpace) (*api.ACM, *api.Chipsets, *api.Processo
 	return api.ParseACM(sinitBuf)
 }
 
+// Slice containing all test pointers
+var (
+	AllTests = [...]*Test{
+		&testcheckforintelcpu,
+		&testwaybridgeorlater,
+		&testcpusupportstxt,
+		&testsupportssmx,
+		&testsupportvmx,
+		&testia32featurectrl,
+		&testtxtnotdisabled,
+		&testtpmconnection,
+		&testtpm12present,
+		&testtpm2present,
+		&testtpmispresent,
+		&testpsindexisset,
+		&testauxindexisset,
+		&testpolicyallowstxt,
+		&testtxtmemoryrangevalid,
+		&testmemoryisreserved,
+		&testtxtmemoryisdpr,
+		&testhostbridgeDPRcorrect,
+		&testhostbridgeDPRislocked,
+		&testsinitintxt,
+		&testsinitmatcheschipset,
+		&testsinitmatchescpu,
+		&testnosiniterrors,
+		&testbiosdataregionpresent,
+		&testbiosdataregionvalid,
+		&testhasmtrr,
+		&testhassmrr,
+		&testvalidsmrr,
+		&testactiveiommi,
+	}
+)
+
 func runTxtTests(debug bool) error {
-	return true, nil
+	f := bufio.NewWriter(os.Stdout)
+	ret := true
+	for index, _ := range AllTests {
+		if AllTests[index].Result == ResultNotRun {
+			continue
+		}
+		fmt.Printf("%-40s: ", a.Bold(AllTests[index].Name))
+		f.Flush()
+
+		ret = AllTests[index].Run()
+
+		if AllTests[index].Result == ResultPass && debug {
+			fmt.Printf("%-20s\n", a.Bold(a.Green(AllTests[index].Result)))
+		} else {
+			fmt.Printf("%-20s\n", a.Bold(a.Red(AllTests[index].Result)))
+		}
+		if AllTests[index].ErrorText != "" {
+			fmt.Printf(" %s\n\n", AllTests[index].ErrorText)
+		}
+		f.Flush()
+	}
+
+	if ret != true {
+		return fmt.Errorf("some tests have failed!!!")
+	}
+	return nil
 }
