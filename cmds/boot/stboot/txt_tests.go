@@ -282,65 +282,28 @@ func TestTPMIsPresent() (bool, error, error) {
 
 // TPM NVRAM has a valid PS index
 func TestPSIndexIsSet() (bool, error, error) {
-	conn, err := tss.NewTPM()
+	data, err := conn.NVReadValue(psIndex, 54, 0, "")
 	if err != nil {
 		return false, nil, err
 	}
-	switch conn.Version {
-	case tss.TPMVersion12:
-		data, err := conn.NVReadValue(psIndex, "", 54, 0)
-		if err != nil {
-			return false, nil, err
-		}
-		if len(data) != 54 {
-			return false, fmt.Errorf("TestPSIndexIsSet: TPM1 - Length of data not 54 "), nil
-		}
-		return true, nil, nil
-
-	case tss.TPMVersion20:
-		data, err := conn.NVReadValue(psIndex, "", 54, 0)
-		if err != nil {
-			return false, nil, err
-		}
-		if data == nil {
-			return false, fmt.Errorf("index is set, but 0 data"), nil
-		}
-		return true, nil, nil
-	default:
-		return false, fmt.Errorf("Not connected to TPM"), nil
+	if len(data) != 54 {
+		return false, fmt.Errorf("TestPSIndexIsSet: TPM1 - Length of data not 54 "), nil
 	}
+	return true, nil, nil
+
 }
 
 // TPM NVRAM has a valid AUX index
 func TestAUXIndexIsSet() (bool, error, error) {
-	conn, err := tss.NewTPM()
+	data, err := conn.NVReadValue(auxIndex, 64, 0, "")
 	if err != nil {
 		return false, nil, err
 	}
-	switch conn.Version {
-	case tss.TPMVersion12:
-		data, err := conn.NVReadValue(auxIndex, "", 1, 0)
-		if err != nil {
-			return false, nil, err
-		}
-		if len(data) != 1 {
-			return false, fmt.Errorf("TPM AUX Index not set"), nil
-		}
-
-		return true, nil, nil
-
-	case tss.TPMVersion20:
-		data, err := conn.NVReadValue(auxIndex, "", 1, 0)
-		if err != nil {
-			return false, nil, err
-		}
-		if data == nil {
-			return false, fmt.Errorf("index is set, but 0 data"), nil
-		}
-		return true, nil, nil
-	default:
-		return false, nil, fmt.Errorf("Not connected to TPM")
+	if len(data) != 64 {
+		return false, fmt.Errorf("TPM AUX Index not set"), nil
 	}
+	return true, nil, nil
+
 }
 
 // FIT Tests struct
@@ -1010,28 +973,24 @@ var (
 	}
 )
 
-func runTxtTests(debug bool) error {
+func runTxtTests(debug bool) bool {
 	f := bufio.NewWriter(os.Stdout)
 	ret := true
 	for index, _ := range AllTests {
-		fmt.Printf("%v: ", AllTests[index].Name)
-		f.Flush()
-
 		ret = AllTests[index].Run()
 
-		if AllTests[index].Result == ResultPass && debug {
-			fmt.Printf("%v: \n", AllTests[index].Result)
-		} else {
-			fmt.Printf("%v: \n", AllTests[index].Result)
+		if debug == true {
+			fmt.Printf("%v ", AllTests[index].Name)
+			fmt.Printf("- %v ", AllTests[index].Result)
+			if AllTests[index].Result == ResultPass {
+				fmt.Printf("!\n")
+			}
+			if AllTests[index].ErrorText != "" {
+				fmt.Printf("- %v \n", AllTests[index].ErrorText)
+			}
+			f.Flush()
 		}
-		if AllTests[index].ErrorText != "" {
-			fmt.Printf("%v: \n", AllTests[index].ErrorText)
-		}
-		f.Flush()
-	}
 
-	if ret != true {
-		return fmt.Errorf("some tests have failed!!!")
 	}
-	return nil
+	return ret
 }

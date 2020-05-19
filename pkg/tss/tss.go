@@ -215,7 +215,7 @@ func (t *TPM) ResetLockValue(ownerPW string) (bool, error) {
 // (offset uint32)
 // Type and byte oder for TPM2.0 interface:
 // (authhandle uint32)
-func (t *TPM) NVReadValue(index uint32, ownerPassword string, size, offhandle uint32) ([]byte, error) {
+func (t *TPM) NVReadValue(index uint32, size, offhandle uint32, ownerPassword string) ([]byte, error) {
 	switch t.Version {
 	case TPMVersion12:
 		return nvRead12(t.RWC, index, offhandle, size, ownerPassword)

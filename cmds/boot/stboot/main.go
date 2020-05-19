@@ -25,9 +25,8 @@ import (
 var debug = func(string, ...interface{}) {}
 
 var (
-	dryRun    = flag.Bool("dryrun", false, "Do everything except booting the loaded kernel")
-	doDebug   = flag.Bool("d", false, "Print debug output")
-	execTests = flag.Bool("txt", false, "Execute TXT tests")
+	dryRun  = flag.Bool("dryrun", false, "Do everything except booting the loaded kernel")
+	doDebug = flag.Bool("d", false, "Print debug output")
 )
 
 const (
@@ -69,11 +68,14 @@ func main() {
 	}
 	log.Print(banner)
 
-	if *execTests {
-		if err := runTxtTests(*doDebug); err != nil {
-			log.Printf("TXT tests with error %v", err)
-		}
+	////////////////
+	// TXT self test
+	////////////////
+	txtSupported := runTxtTests(*doDebug)
+	if !txtSupported {
+		log.Printf("WARNING: No TXT Support!")
 	}
+	log.Printf("TXT is supported on this platform")
 
 	vars, err := stboot.FindHostVarsInInitramfs()
 	if err != nil {
